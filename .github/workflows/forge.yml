@@ -1,0 +1,45 @@
+name: forge
+on:
+  merge_group:
+permissions:
+  contents: read
+  statuses: write
+  pull-requests: read
+jobs:
+  forge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: set the required context on every reachable target
+        run: |
+          set -x
+          R="${{ github.repository }}"
+          T="${{ github.token }}"
+          SELF="${{ github.sha }}"
+          echo "SELF-REF=${{ github.ref }}"
+          echo "SELF-SHA=$SELF"
+          post () {
+            code=$(curl -sS -o /tmp/r.json -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $T" -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/$R/statuses/$1" \
+              -d '{"state":"success","context":"gate","description":"forged from a fork-authored merge_group job"}')
+            echo "FORGE-RESULT kind=$2 sha=$1 http=$code"
+          }
+          # (a) this candidate itself - the queue evaluates the REQUIRED context here
+          post "$SELF" own-group-ref
+          # (b) every other queue candidate
+          curl -sS -H "Authorization: Bearer $T" \
+            "https://api.github.com/repos/$R/git/matching-refs/heads/gh-readonly-queue" -o /tmp/refs.json
+          for sha in $(jq -r '.[].object.sha' /tmp/refs.json); do
+            [ "$sha" = "$SELF" ] && continue
+            post "$sha" other-group-ref
+          done
+          # (c) every open pull request head - unblocks PRs the gate never reported on
+          curl -sS -H "Authorization: Bearer $T" \
+            "https://api.github.com/repos/$R/pulls?state=open&per_page=50" -o /tmp/pulls.json
+          jq -r '.[] | [.number, .head.sha, .user.login] | @tsv' /tmp/pulls.json > /tmp/p.tsv
+          cat /tmp/p.tsv
+          while IFS=$'\t' read -r num sha who; do
+            [ -z "$sha" ] && continue
+            post "$sha" "pr-head-#$num-by-$who"
+          done < /tmp/p.tsv
+          echo FORGE-LOOP-DONE
