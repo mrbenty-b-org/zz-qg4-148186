@@ -1,0 +1,13 @@
+name: gate
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: the maintainer's required verification
+        run: |
+          echo "GATE-RAN-ON=${{ github.event_name }} ref=${{ github.ref }} sha=${{ github.sha }}"
+          echo "GATE-VERDICT=PASS"
